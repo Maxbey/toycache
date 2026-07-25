@@ -18,22 +18,19 @@ const (
 )
 
 type Config struct {
-	Host string
-	Port int
+	Host           string
+	Port           int
+	MaxConnections int
 }
 
 type Server struct {
-	cfg     Config
-	errChan chan error
+	cfg Config
 }
 
-func NewServer(cfg Config) (Server, chan error) {
-	ch := make(chan error)
-
+func NewServer(cfg Config) Server {
 	return Server{
-		cfg:     cfg,
-		errChan: ch,
-	}, ch
+		cfg: cfg,
+	}
 }
 
 func (s Server) Run(ctx context.Context) error {
@@ -41,30 +38,40 @@ func (s Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating TCP listener: %v", err)
 	}
+	defer listener.Close()
 
 	slog.Info("Started server", "host", s.cfg.Host, "port", s.cfg.Port)
 
+	slots := make(chan struct{}, s.cfg.MaxConnections)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
+		case slots <- struct{}{}:
 		}
 
 		con, err := listener.Accept()
 		if errors.Is(err, net.ErrClosed) {
+			<-slots
 			return err
 		}
 		if err != nil {
-			// what to do here?
+			// Add retry?
+			<-slots
 			continue
 		}
 
-		handle(con)
+		go func(con net.Conn) {
+			defer func() { <-slots }()
+
+			if err := s.handle(con); err != nil && !errors.Is(err, io.EOF) {
+				slog.Error("connection failed", "error", err)
+			}
+		}(con)
 	}
 }
 
-func handle(con net.Conn) error {
+func (s Server) handle(con net.Conn) error {
 	defer con.Close()
 
 	var (

@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	host = flag.String("host", "", "api server host")
-	port = flag.Int("port", 0, "api server port")
+	host           = flag.String("host", "", "api server host")
+	port           = flag.Int("port", 0, "api server port")
+	maxConnections = flag.Int("max-connections", 1024, "api server port")
 )
 
 func main() {
@@ -23,11 +24,12 @@ func main() {
 	}
 
 	cfg := api.Config{
-		Host: *host,
-		Port: *port,
+		Host:           *host,
+		Port:           *port,
+		MaxConnections: *maxConnections,
 	}
 
-	server, _ := api.NewServer(cfg)
+	server := api.NewServer(cfg)
 	if err := server.Run(context.Background()); err != nil {
 		log.Fatalf("err running api server: %v", err)
 	}
