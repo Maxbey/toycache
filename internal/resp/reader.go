@@ -10,44 +10,26 @@ import (
 )
 
 const (
-	terminatorLength    = 2
 	maxBulkStringLength = 1 << 20
 	maxArrayElements    = 1024
 	maxNestingDepth     = 32
 	maxLineLength       = 64 << 10
 )
 
-type dataType byte
-
-const (
-	String     dataType = '+'
-	Error      dataType = '-'
-	Integer    dataType = ':'
-	BulkString dataType = '$'
-	Array      dataType = '*'
-)
-
-type Element struct {
-	Type     dataType
-	Value    []byte
-	Null     bool
-	Elements []Element
-}
-
-type Parser struct {
+type Reader struct {
 	reader *bufio.Reader
 }
 
-func NewParser(reader *bufio.Reader) Parser {
-	return Parser{reader: reader}
+func NewReader(reader *bufio.Reader) Reader {
+	return Reader{reader: reader}
 }
 
-func (p Parser) Parse() (Element, error) {
-	return p.parse(0)
+func (d Reader) Read() (Element, error) {
+	return d.read(0)
 }
 
-func (p Parser) parse(depth int) (Element, error) {
-	b, err := p.reader.ReadByte()
+func (d Reader) read(depth int) (Element, error) {
+	b, err := d.reader.ReadByte()
 	if err != nil {
 		return Element{}, fmt.Errorf("error reading buffer: %v", err)
 	}
@@ -55,19 +37,19 @@ func (p Parser) parse(depth int) (Element, error) {
 	t := dataType(b)
 	switch t {
 	case Error, String:
-		el, err := p.parseSimple(t)
+		el, err := d.readSimple(t)
 		if err != nil {
 			return Element{}, fmt.Errorf("error parsing simple element: %v", err)
 		}
 		return el, nil
 	case Integer:
-		el, err := p.parseInteger(t)
+		el, err := d.readInteger(t)
 		if err != nil {
 			return Element{}, fmt.Errorf("error parsing integer: %v", err)
 		}
 		return el, nil
 	case BulkString:
-		el, err := p.parseBulkString(t)
+		el, err := d.readBulkString(t)
 		if err != nil {
 			return Element{}, fmt.Errorf("error parsing bulk string: %v", err)
 		}
@@ -77,7 +59,7 @@ func (p Parser) parse(depth int) (Element, error) {
 			return Element{}, fmt.Errorf("maximum RESP nesting depth exceeded: %d", maxNestingDepth)
 		}
 
-		el, err := p.parseArray(t, depth+1)
+		el, err := d.readArray(t, depth+1)
 		if err != nil {
 			return Element{}, fmt.Errorf("error parsing array: %v", err)
 		}
@@ -87,8 +69,8 @@ func (p Parser) parse(depth int) (Element, error) {
 	}
 }
 
-func (p Parser) parseSimple(t dataType) (Element, error) {
-	value, err := p.readUntilTerminator()
+func (d Reader) readSimple(t dataType) (Element, error) {
+	value, err := d.readUntilTerminator()
 	if err != nil {
 		return Element{}, fmt.Errorf("error reading simple element: %v", err)
 	}
@@ -96,8 +78,8 @@ func (p Parser) parseSimple(t dataType) (Element, error) {
 	return Element{Type: t, Value: value}, nil
 }
 
-func (p Parser) parseInteger(t dataType) (Element, error) {
-	value, err := p.readUntilTerminator()
+func (d Reader) readInteger(t dataType) (Element, error) {
+	value, err := d.readUntilTerminator()
 	if err != nil {
 		return Element{}, fmt.Errorf("error reading integer: %v", err)
 	}
@@ -109,8 +91,8 @@ func (p Parser) parseInteger(t dataType) (Element, error) {
 	return Element{Type: t, Value: value}, nil
 }
 
-func (p Parser) parseBulkString(t dataType) (Element, error) {
-	length, err := p.readLengthPrefix()
+func (d Reader) readBulkString(t dataType) (Element, error) {
+	length, err := d.readLengthPrefix()
 	if err != nil {
 		return Element{}, err
 	}
@@ -124,7 +106,7 @@ func (p Parser) parseBulkString(t dataType) (Element, error) {
 		return Element{}, fmt.Errorf("bulk string length exceeds maximum of %d bytes: %d", maxBulkStringLength, length)
 	}
 
-	value, err := p.readExact(length)
+	value, err := d.readExact(length)
 	if err != nil {
 		return Element{}, err
 	}
@@ -132,8 +114,8 @@ func (p Parser) parseBulkString(t dataType) (Element, error) {
 	return Element{Type: t, Value: value}, nil
 }
 
-func (p Parser) parseArray(t dataType, depth int) (Element, error) {
-	length, err := p.readLengthPrefix()
+func (d Reader) readArray(t dataType, depth int) (Element, error) {
+	length, err := d.readLengthPrefix()
 	if err != nil {
 		return Element{}, err
 	}
@@ -151,7 +133,7 @@ func (p Parser) parseArray(t dataType, depth int) (Element, error) {
 
 	elements := make([]Element, 0, length)
 	for i := range length {
-		child, err := p.parse(depth)
+		child, err := d.read(depth)
 		if err != nil {
 			return Element{}, fmt.Errorf("error parsing array element %d: %v", i, err)
 		}
@@ -164,16 +146,16 @@ func (p Parser) parseArray(t dataType, depth int) (Element, error) {
 	return el, nil
 }
 
-func (p Parser) readUntilTerminator() ([]byte, error) {
+func (d Reader) readUntilTerminator() ([]byte, error) {
 	buf := make([]byte, 0, 8)
 
 	for {
-		b, err := p.reader.ReadByte()
+		b, err := d.reader.ReadByte()
 		if err != nil {
 			return nil, fmt.Errorf("error reading buffer: %v", err)
 		}
 
-		terminated, err := p.isTerminated(b)
+		terminated, err := d.isTerminated(b)
 		if err != nil {
 			return nil, fmt.Errorf("statement is not terminated properly: %v", err)
 		}
@@ -189,13 +171,13 @@ func (p Parser) readUntilTerminator() ([]byte, error) {
 	}
 }
 
-func (p Parser) readExact(length int) ([]byte, error) {
+func (d Reader) readExact(length int) ([]byte, error) {
 	if length < 0 {
 		return nil, fmt.Errorf("cannot parse exact stream portion with negative length: %d", length)
 	}
 
 	buf := make([]byte, length, length)
-	n, err := io.ReadFull(p.reader, buf)
+	n, err := io.ReadFull(d.reader, buf)
 	if err != nil {
 		return nil, fmt.Errorf("error reading buffer: %v", err)
 	}
@@ -204,12 +186,12 @@ func (p Parser) readExact(length int) ([]byte, error) {
 		return nil, fmt.Errorf("incomplete buffer read: got %d, want %d", length, n)
 	}
 
-	b, err := p.reader.ReadByte()
+	b, err := d.reader.ReadByte()
 	if err != nil {
 		return nil, fmt.Errorf("error reading buffer: %v", err)
 	}
 
-	terminated, err := p.isTerminated(b)
+	terminated, err := d.isTerminated(b)
 	if err != nil {
 		return nil, fmt.Errorf("statement is not terminated properly: %v", err)
 	}
@@ -220,8 +202,8 @@ func (p Parser) readExact(length int) ([]byte, error) {
 	return buf, nil
 }
 
-func (p Parser) readLengthPrefix() (int, error) {
-	value, err := p.readUntilTerminator()
+func (d Reader) readLengthPrefix() (int, error) {
+	value, err := d.readUntilTerminator()
 	if err != nil {
 		return 0, fmt.Errorf("unable to read prefix length: %v", err)
 	}
@@ -234,7 +216,7 @@ func (p Parser) readLengthPrefix() (int, error) {
 	return length, nil
 }
 
-func (p Parser) isTerminated(b byte) (bool, error) {
+func (d Reader) isTerminated(b byte) (bool, error) {
 	if b == '\n' {
 		return false, errors.New("encountered \\n without preceding \\r")
 	}
@@ -242,7 +224,7 @@ func (p Parser) isTerminated(b byte) (bool, error) {
 		return false, nil
 	}
 
-	b, err := p.reader.ReadByte()
+	b, err := d.reader.ReadByte()
 	if err != nil {
 		return false, fmt.Errorf("error reading buffer: %v", err)
 	}

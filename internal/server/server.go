@@ -1,4 +1,4 @@
-package api
+package server
 
 import (
 	"bufio"
@@ -21,10 +21,10 @@ type Config struct {
 
 type Server struct {
 	cfg     Config
-	handler func(*bufio.Reader) error
+	handler func(*bufio.ReadWriter) error
 }
 
-func NewServer(cfg Config, handler func(*bufio.Reader) error) Server {
+func NewServer(cfg Config, handler func(*bufio.ReadWriter) error) Server {
 	return Server{
 		cfg:     cfg,
 		handler: handler,
@@ -39,6 +39,14 @@ func (s Server) Run(ctx context.Context) error {
 	defer listener.Close()
 
 	slog.Info("Started server", "host", s.cfg.Host, "port", s.cfg.Port)
+	return s.serve(ctx, listener)
+}
+
+func (s Server) serve(ctx context.Context, listener net.Listener) error {
+	stopClosingListener := context.AfterFunc(ctx, func() {
+		_ = listener.Close()
+	})
+	defer stopClosingListener()
 
 	slots := make(chan struct{}, s.cfg.MaxConnections)
 	for {
@@ -51,6 +59,10 @@ func (s Server) Run(ctx context.Context) error {
 		con, err := listener.Accept()
 		if errors.Is(err, net.ErrClosed) {
 			<-slots
+			if ctx.Err() != nil {
+				return nil
+			}
+
 			return err
 		}
 		if err != nil {
@@ -70,7 +82,11 @@ func (s Server) Run(ctx context.Context) error {
 func (s Server) handle(con net.Conn) {
 	defer con.Close()
 
-	if err := s.handler(bufio.NewReader(con)); err != nil {
+	readWriter := bufio.NewReadWriter(
+		bufio.NewReader(con),
+		bufio.NewWriter(con),
+	)
+	if err := s.handler(readWriter); err != nil {
 		slog.Warn("error handling the client connection", "error", err)
 	}
 }

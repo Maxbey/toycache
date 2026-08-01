@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-func newTestParser(stream string) *Parser {
-	parser := NewParser(bufio.NewReader(strings.NewReader(stream)))
-	return &parser
+func newTestReader(stream string) *Reader {
+	reader := NewReader(bufio.NewReader(strings.NewReader(stream)))
+	return &reader
 }
 
-func mustParse(t *testing.T, parser *Parser) Element {
+func mustRead(t *testing.T, reader *Reader) Element {
 	t.Helper()
 
-	element, err := parser.Parse()
+	element, err := reader.Read()
 	if err != nil {
 		t.Fatalf("expected element to parse: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestParseScalarElements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			element := mustParse(t, newTestParser(tt.stream))
+			element := mustRead(t, newTestReader(tt.stream))
 			if element.Type != tt.typeID {
 				t.Fatalf("unexpected type: got %q, want %q", element.Type, tt.typeID)
 			}
@@ -53,28 +53,28 @@ func TestParseScalarElements(t *testing.T) {
 
 func TestParseBulkStrings(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		element := mustParse(t, newTestParser("$5\r\nhello\r\n"))
+		element := mustRead(t, newTestReader("$5\r\nhello\r\n"))
 		if element.Type != BulkString || element.Null || string(element.Value) != "hello" {
 			t.Fatalf("unexpected bulk string: %+v", element)
 		}
 	})
 
 	t.Run("empty", func(t *testing.T) {
-		element := mustParse(t, newTestParser("$0\r\n\r\n"))
+		element := mustRead(t, newTestReader("$0\r\n\r\n"))
 		if element.Null || len(element.Value) != 0 {
 			t.Fatalf("expected non-null empty bulk string: %+v", element)
 		}
 	})
 
 	t.Run("null", func(t *testing.T) {
-		element := mustParse(t, newTestParser("$-1\r\n"))
+		element := mustRead(t, newTestReader("$-1\r\n"))
 		if !element.Null || element.Type != BulkString {
 			t.Fatalf("expected null bulk string: %+v", element)
 		}
 	})
 
 	t.Run("embedded CRLF", func(t *testing.T) {
-		element := mustParse(t, newTestParser("$4\r\na\r\nb\r\n"))
+		element := mustRead(t, newTestReader("$4\r\na\r\nb\r\n"))
 		if !bytes.Equal(element.Value, []byte{'a', '\r', '\n', 'b'}) {
 			t.Fatalf("unexpected payload: %q", element.Value)
 		}
@@ -83,8 +83,8 @@ func TestParseBulkStrings(t *testing.T) {
 
 func TestParseArrays(t *testing.T) {
 	t.Run("command", func(t *testing.T) {
-		parser := newTestParser("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-		element := mustParse(t, parser)
+		reader := newTestReader("*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
+		element := mustRead(t, reader)
 		if element.Type != Array || element.Null || len(element.Elements) != 3 {
 			t.Fatalf("unexpected array: %+v", element)
 		}
@@ -96,22 +96,22 @@ func TestParseArrays(t *testing.T) {
 	})
 
 	t.Run("empty", func(t *testing.T) {
-		element := mustParse(t, newTestParser("*0\r\n"))
+		element := mustRead(t, newTestReader("*0\r\n"))
 		if element.Null || len(element.Elements) != 0 {
 			t.Fatalf("expected non-null empty array: %+v", element)
 		}
 	})
 
 	t.Run("null", func(t *testing.T) {
-		element := mustParse(t, newTestParser("*-1\r\n"))
+		element := mustRead(t, newTestReader("*-1\r\n"))
 		if !element.Null || element.Type != Array {
 			t.Fatalf("expected null array: %+v", element)
 		}
 	})
 
 	t.Run("mixed and nested", func(t *testing.T) {
-		parser := newTestParser("*3\r\n+OK\r\n:2\r\n*1\r\n$3\r\nhey\r\n")
-		element := mustParse(t, parser)
+		reader := newTestReader("*3\r\n+OK\r\n:2\r\n*1\r\n$3\r\nhey\r\n")
+		element := mustRead(t, reader)
 		if len(element.Elements) != 3 || len(element.Elements[2].Elements) != 1 {
 			t.Fatalf("unexpected nested array: %+v", element)
 		}
@@ -121,15 +121,15 @@ func TestParseArrays(t *testing.T) {
 	})
 }
 
-func TestParserReadsPipelinedElements(t *testing.T) {
-	parser := newTestParser("+OK\r\n:42\r\n")
-	first := mustParse(t, parser)
-	second := mustParse(t, parser)
+func TestReaderReadsPipelinedElements(t *testing.T) {
+	reader := newTestReader("+OK\r\n:42\r\n")
+	first := mustRead(t, reader)
+	second := mustRead(t, reader)
 
 	if string(first.Value) != "OK" || string(second.Value) != "42" {
 		t.Fatalf("unexpected elements: first=%q second=%q", first.Value, second.Value)
 	}
-	if _, err := parser.Parse(); err == nil {
+	if _, err := reader.Read(); err == nil {
 		t.Fatal("expected EOF after both pipelined elements")
 	}
 }
@@ -153,7 +153,7 @@ func TestParseRejectsMalformedInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := newTestParser(tt.stream).Parse(); err == nil {
+			if _, err := newTestReader(tt.stream).Read(); err == nil {
 				t.Fatalf("expected malformed input to be rejected: %q", tt.stream)
 			}
 		})
@@ -162,32 +162,32 @@ func TestParseRejectsMalformedInput(t *testing.T) {
 
 func TestParseRejectsOversizedBulkString(t *testing.T) {
 	stream := fmt.Sprintf("$%d\r\n", maxBulkStringLength+1)
-	if _, err := newTestParser(stream).Parse(); err == nil {
+	if _, err := newTestReader(stream).Read(); err == nil {
 		t.Fatal("expected oversized bulk string to be rejected")
 	}
 }
 
 func TestParseRejectsOversizedArray(t *testing.T) {
 	stream := fmt.Sprintf("*%d\r\n", maxArrayElements+1)
-	if _, err := newTestParser(stream).Parse(); err == nil {
+	if _, err := newTestReader(stream).Read(); err == nil {
 		t.Fatal("expected oversized array to be rejected")
 	}
 }
 
 func TestParseNestingDepth(t *testing.T) {
 	valid := strings.Repeat("*1\r\n", maxNestingDepth) + "+OK\r\n"
-	if _, err := newTestParser(valid).Parse(); err != nil {
+	if _, err := newTestReader(valid).Read(); err != nil {
 		t.Fatalf("expected maximum nesting depth to be accepted: %v", err)
 	}
 
 	tooDeep := strings.Repeat("*1\r\n", maxNestingDepth+1) + "+OK\r\n"
-	if _, err := newTestParser(tooDeep).Parse(); err == nil {
+	if _, err := newTestReader(tooDeep).Read(); err == nil {
 		t.Fatal("expected excessive nesting depth to be rejected")
 	}
 }
 
 func TestParseSimpleStringRequiresCRLF(t *testing.T) {
-	if _, err := newTestParser("+hello\r\n").Parse(); err != nil {
+	if _, err := newTestReader("+hello\r\n").Read(); err != nil {
 		t.Fatalf("expected CRLF-terminated simple string to be accepted: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestParseSimpleStringRequiresCRLF(t *testing.T) {
 		"+hello\nworld\r\n",
 		"+hello\rworld\r\n",
 	} {
-		if _, err := newTestParser(stream).Parse(); err == nil {
+		if _, err := newTestReader(stream).Read(); err == nil {
 			t.Fatalf("expected invalid line ending to be rejected: %q", stream)
 		}
 	}
@@ -210,7 +210,7 @@ func TestParseIntegerValidation(t *testing.T) {
 		":9223372036854775807\r\n",
 		":-9223372036854775808\r\n",
 	} {
-		if _, err := newTestParser(stream).Parse(); err != nil {
+		if _, err := newTestReader(stream).Read(); err != nil {
 			t.Fatalf("expected valid integer to be accepted: %q: %v", stream, err)
 		}
 	}
@@ -222,7 +222,7 @@ func TestParseIntegerValidation(t *testing.T) {
 		":9223372036854775808\r\n",
 		":-9223372036854775809\r\n",
 	} {
-		if _, err := newTestParser(stream).Parse(); err == nil {
+		if _, err := newTestReader(stream).Read(); err == nil {
 			t.Fatalf("expected invalid integer to be rejected: %q", stream)
 		}
 	}
@@ -230,12 +230,12 @@ func TestParseIntegerValidation(t *testing.T) {
 
 func TestParseLineLengthLimit(t *testing.T) {
 	atLimit := "+" + strings.Repeat("a", maxLineLength) + "\r\n"
-	if _, err := newTestParser(atLimit).Parse(); err != nil {
+	if _, err := newTestReader(atLimit).Read(); err != nil {
 		t.Fatalf("expected line at maximum length to be accepted: %v", err)
 	}
 
 	overLimit := "+" + strings.Repeat("a", maxLineLength+1) + "\r\n"
-	if _, err := newTestParser(overLimit).Parse(); err == nil {
+	if _, err := newTestReader(overLimit).Read(); err == nil {
 		t.Fatal("expected line over maximum length to be rejected")
 	}
 }

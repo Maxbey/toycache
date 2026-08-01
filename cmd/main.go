@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/Maxbey/toycache/internal/api"
-	"github.com/Maxbey/toycache/internal/cache"
+	"github.com/Maxbey/toycache/internal/server"
 )
 
 var (
@@ -24,14 +24,14 @@ func main() {
 		log.Fatalf("invalid flags: %v", err)
 	}
 
-	cfg := api.Config{
+	cfg := server.Config{
 		Host:           *host,
 		Port:           *port,
 		MaxConnections: *maxConnections,
 	}
 
-	server := api.NewServer(cfg, cache.Entrypoint)
-	if err := server.Run(context.Background()); err != nil {
+	srv := server.NewServer(cfg, api.Entrypoint)
+	if err := srv.Run(context.Background()); err != nil {
 		log.Fatalf("err running api server: %v", err)
 	}
 }
