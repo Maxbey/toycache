@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/Maxbey/toycache/internal/api"
+	"github.com/Maxbey/toycache/internal/cache"
 )
 
 var (
@@ -29,7 +30,7 @@ func main() {
 		MaxConnections: *maxConnections,
 	}
 
-	server := api.NewServer(cfg)
+	server := api.NewServer(cfg, cache.Entrypoint)
 	if err := server.Run(context.Background()); err != nil {
 		log.Fatalf("err running api server: %v", err)
 	}

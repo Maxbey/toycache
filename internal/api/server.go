@@ -1,20 +1,16 @@
 package api
 
 import (
+	"bufio"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 )
 
 const (
-	protocol          = "tcp"
-	frameLengthHeader = 4
-	frameMaxBuffer    = 1 << 20
-	sharedFrameBuffer = 4 << 10
+	protocol = "tcp"
 )
 
 type Config struct {
@@ -24,12 +20,14 @@ type Config struct {
 }
 
 type Server struct {
-	cfg Config
+	cfg     Config
+	handler func(*bufio.Reader) error
 }
 
-func NewServer(cfg Config) Server {
+func NewServer(cfg Config, handler func(*bufio.Reader) error) Server {
 	return Server{
-		cfg: cfg,
+		cfg:     cfg,
+		handler: handler,
 	}
 }
 
@@ -64,63 +62,15 @@ func (s Server) Run(ctx context.Context) error {
 		go func(con net.Conn) {
 			defer func() { <-slots }()
 
-			if err := s.handle(con); err != nil && !errors.Is(err, io.EOF) {
-				slog.Error("connection failed", "error", err)
-			}
+			s.handle(con)
 		}(con)
 	}
 }
 
-func (s Server) handle(con net.Conn) error {
+func (s Server) handle(con net.Conn) {
 	defer con.Close()
 
-	var (
-		frame  []byte
-		err    error
-		length uint32
-	)
-	headerBuf := make([]byte, frameLengthHeader)
-	sharedMessageBuf := make([]byte, sharedFrameBuffer)
-
-	for {
-		length, err = readFrameLength(con, headerBuf)
-		if err != nil {
-			return err
-		}
-
-		if length > sharedFrameBuffer {
-			frame, err = readFrame(con, make([]byte, length))
-		} else {
-			frame, err = readFrame(con, sharedMessageBuf[:length])
-		}
-		if err != nil {
-			return err
-		}
-
-		slog.Info("got", "frame", frame)
+	if err := s.handler(bufio.NewReader(con)); err != nil {
+		slog.Warn("error handling the client connection", "error", err)
 	}
-
-}
-
-func readFrameLength(con net.Conn, buf []byte) (uint32, error) {
-	_, err := io.ReadFull(con, buf)
-	if err != nil {
-		return 0, err
-	}
-
-	length := binary.BigEndian.Uint32(buf[:])
-	if length > frameMaxBuffer {
-		return 0, fmt.Errorf("frame size is too big: %d", length)
-	}
-
-	return length, nil
-}
-
-func readFrame(con net.Conn, buf []byte) ([]byte, error) {
-	_, err := io.ReadFull(con, buf)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf, nil
 }

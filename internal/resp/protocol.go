@@ -1,8 +1,11 @@
 package resp
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
+
 	"strconv"
 )
 
@@ -11,6 +14,7 @@ const (
 	maxBulkStringLength = 1 << 20
 	maxArrayElements    = 1024
 	maxNestingDepth     = 32
+	maxLineLength       = 64 << 10
 )
 
 type dataType byte
@@ -30,207 +34,221 @@ type Element struct {
 	Elements []Element
 }
 
-func Parse(stream []byte, cursor int) (Element, int, error) {
-	return parse(stream, cursor, 0)
+type Parser struct {
+	reader *bufio.Reader
 }
 
-func parse(stream []byte, cursor, depth int) (Element, int, error) {
-	if cursor < 0 || cursor >= len(stream) {
-		return Element{}, 0, fmt.Errorf("cannot parse element: stream cursor is out of range: %d", cursor)
+func NewParser(reader *bufio.Reader) Parser {
+	return Parser{reader: reader}
+}
+
+func (p Parser) Parse() (Element, error) {
+	return p.parse(0)
+}
+
+func (p Parser) parse(depth int) (Element, error) {
+	b, err := p.reader.ReadByte()
+	if err != nil {
+		return Element{}, fmt.Errorf("error reading buffer: %v", err)
 	}
 
-	t := dataType(stream[cursor])
+	t := dataType(b)
 	switch t {
 	case Error, String:
-		el, cursor, err := parseSimple(t, stream, cursor+1)
+		el, err := p.parseSimple(t)
 		if err != nil {
-			return Element{}, 0, fmt.Errorf("error parsing simple element: %v", err)
+			return Element{}, fmt.Errorf("error parsing simple element: %v", err)
 		}
-		return el, cursor, nil
+		return el, nil
 	case Integer:
-		el, cursor, err := parseInteger(t, stream, cursor+1)
+		el, err := p.parseInteger(t)
 		if err != nil {
-			return Element{}, 0, fmt.Errorf("error parsing integer: %v", err)
+			return Element{}, fmt.Errorf("error parsing integer: %v", err)
 		}
-		return el, cursor, nil
+		return el, nil
 	case BulkString:
-		el, cursor, err := parseBulkString(t, stream, cursor+1)
+		el, err := p.parseBulkString(t)
 		if err != nil {
-			return Element{}, 0, fmt.Errorf("error parsing bulk string: %v", err)
+			return Element{}, fmt.Errorf("error parsing bulk string: %v", err)
 		}
-		return el, cursor, nil
+		return el, nil
 	case Array:
 		if depth >= maxNestingDepth {
-			return Element{}, 0, fmt.Errorf("maximum RESP nesting depth exceeded: %d", maxNestingDepth)
+			return Element{}, fmt.Errorf("maximum RESP nesting depth exceeded: %d", maxNestingDepth)
 		}
 
-		el, cursor, err := parseArray(t, stream, cursor+1, depth+1)
+		el, err := p.parseArray(t, depth+1)
 		if err != nil {
-			return Element{}, 0, fmt.Errorf("error parsing array: %v", err)
+			return Element{}, fmt.Errorf("error parsing array: %v", err)
 		}
-		return el, cursor, nil
+		return el, nil
 	default:
-		return Element{}, 0, fmt.Errorf("cannot parse invalid data type: %d", t)
+		return Element{}, fmt.Errorf("cannot parse invalid data type: %d", t)
 	}
 }
 
-func parseSimple(t dataType, stream []byte, cursor int) (Element, int, error) {
-	value, cursor, err := readUntilTerminator(stream, cursor, nil)
+func (p Parser) parseSimple(t dataType) (Element, error) {
+	value, err := p.readUntilTerminator()
 	if err != nil {
-		return Element{}, 0, fmt.Errorf("error reading simple element: %v", err)
+		return Element{}, fmt.Errorf("error reading simple element: %v", err)
 	}
 
-	return Element{Type: t, Value: value}, cursor, nil
+	return Element{Type: t, Value: value}, nil
 }
 
-func parseInteger(t dataType, stream []byte, cursor int) (Element, int, error) {
-	value, cursor, err := readUntilTerminator(stream, cursor, nil)
+func (p Parser) parseInteger(t dataType) (Element, error) {
+	value, err := p.readUntilTerminator()
 	if err != nil {
-		return Element{}, 0, fmt.Errorf("error reading integer: %v", err)
+		return Element{}, fmt.Errorf("error reading integer: %v", err)
 	}
 
 	if _, err := strconv.ParseInt(string(value), 10, 64); err != nil {
-		return Element{}, 0, fmt.Errorf("invalid RESP integer %q: %v", value, err)
+		return Element{}, fmt.Errorf("invalid RESP integer %q: %v", value, err)
 	}
 
-	return Element{Type: t, Value: value}, cursor, nil
+	return Element{Type: t, Value: value}, nil
 }
 
-func parseBulkString(t dataType, stream []byte, cursor int) (Element, int, error) {
-	length, cursor, err := readLengthPrefix(stream, cursor)
+func (p Parser) parseBulkString(t dataType) (Element, error) {
+	length, err := p.readLengthPrefix()
 	if err != nil {
-		return Element{}, 0, err
+		return Element{}, err
 	}
 	if length < -1 {
-		return Element{}, 0, fmt.Errorf("bulk string length cannot be less than -1: %d", length)
+		return Element{}, fmt.Errorf("bulk string length cannot be less than -1: %d", length)
 	}
 	if length == -1 {
-		return Element{Type: t, Null: true}, cursor, nil
+		return Element{Type: t, Null: true}, nil
 	}
 	if length > maxBulkStringLength {
-		return Element{}, 0, fmt.Errorf("bulk string length exceeds maximum of %d bytes: %d", maxBulkStringLength, length)
+		return Element{}, fmt.Errorf("bulk string length exceeds maximum of %d bytes: %d", maxBulkStringLength, length)
 	}
 
-	value, cursor, err := readExact(stream, cursor, length)
+	value, err := p.readExact(length)
 	if err != nil {
-		return Element{}, 0, err
+		return Element{}, err
 	}
 
-	return Element{Type: t, Value: value}, cursor, nil
+	return Element{Type: t, Value: value}, nil
 }
 
-func parseArray(t dataType, stream []byte, cursor, depth int) (Element, int, error) {
-	length, cursor, err := readLengthPrefix(stream, cursor)
+func (p Parser) parseArray(t dataType, depth int) (Element, error) {
+	length, err := p.readLengthPrefix()
 	if err != nil {
-		return Element{}, 0, err
+		return Element{}, err
 	}
 	if length < -1 {
-		return Element{}, 0, fmt.Errorf("array length cannot be less than -1: %d", length)
+		return Element{}, fmt.Errorf("array length cannot be less than -1: %d", length)
 	}
 	if length > maxArrayElements {
-		return Element{}, 0, fmt.Errorf("array length exceeds maximum of %d elements: %d", maxArrayElements, length)
+		return Element{}, fmt.Errorf("array length exceeds maximum of %d elements: %d", maxArrayElements, length)
 	}
 
 	el := Element{Type: t, Null: length == -1}
 	if el.Null {
-		return el, cursor, nil
+		return el, nil
 	}
 
 	elements := make([]Element, 0, length)
 	for i := range length {
-		child, nextCursor, err := parse(stream, cursor, depth)
+		child, err := p.parse(depth)
 		if err != nil {
-			return Element{}, 0, fmt.Errorf("error parsing array element %d: %v", i, err)
+			return Element{}, fmt.Errorf("error parsing array element %d: %v", i, err)
 		}
 
 		elements = append(elements, child)
-		cursor = nextCursor
 	}
 
 	el.Elements = elements
 
-	return el, cursor, nil
+	return el, nil
 }
 
-func readUntilTerminator(stream []byte, cursor int, buf []byte) ([]byte, int, error) {
-	if cursor >= len(stream)-1 {
-		return nil, 0, fmt.Errorf("cannot parse the length prefix: stream cursor is out of range: %d", cursor)
-	}
+func (p Parser) readUntilTerminator() ([]byte, error) {
+	buf := make([]byte, 0, 8)
 
-	if buf == nil {
-		buf = make([]byte, 0, 8)
-	}
-	for cursor < len(stream) {
-		terminated, err := isTerminated(stream, cursor)
+	for {
+		b, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, 0, fmt.Errorf("statement is not terminated properly: %v", err)
+			return nil, fmt.Errorf("error reading buffer: %v", err)
+		}
+
+		terminated, err := p.isTerminated(b)
+		if err != nil {
+			return nil, fmt.Errorf("statement is not terminated properly: %v", err)
 		}
 
 		if terminated {
-			return buf, cursor + terminatorLength, nil
+			return buf, nil
+		}
+		if len(buf) >= maxLineLength {
+			return nil, fmt.Errorf("RESP line exceeds maximum of %d bytes", maxLineLength)
 		}
 
-		buf = append(buf, stream[cursor])
-		cursor += 1
+		buf = append(buf, b)
 	}
-
-	return nil, 0, fmt.Errorf("stream is not terminated")
 }
 
-func readExact(stream []byte, cursor int, length int) ([]byte, int, error) {
-	if cursor < 0 || cursor > len(stream) {
-		return nil, 0, fmt.Errorf("cannot parse exact stream portion: cursor is out of range: %d", cursor)
-	}
+func (p Parser) readExact(length int) ([]byte, error) {
 	if length < 0 {
-		return nil, 0, fmt.Errorf("cannot parse exact stream portion with negative length: %d", length)
+		return nil, fmt.Errorf("cannot parse exact stream portion with negative length: %d", length)
 	}
 
-	remaining := len(stream) - cursor
-	if remaining < terminatorLength || length > remaining-terminatorLength {
-		return nil, 0, fmt.Errorf("cannot parse exact stream portion: need %d payload bytes and a terminator, have %d bytes", length, remaining)
-	}
-
-	end := cursor + length
-	value := stream[cursor:end]
-	cursor = end
-	terminated, err := isTerminated(stream, cursor)
+	buf := make([]byte, length, length)
+	n, err := io.ReadFull(p.reader, buf)
 	if err != nil {
-		return nil, 0, fmt.Errorf("statement is not terminated properly: %v", err)
+		return nil, fmt.Errorf("error reading buffer: %v", err)
+	}
+
+	if n != length {
+		return nil, fmt.Errorf("incomplete buffer read: got %d, want %d", length, n)
+	}
+
+	b, err := p.reader.ReadByte()
+	if err != nil {
+		return nil, fmt.Errorf("error reading buffer: %v", err)
+	}
+
+	terminated, err := p.isTerminated(b)
+	if err != nil {
+		return nil, fmt.Errorf("statement is not terminated properly: %v", err)
 	}
 	if !terminated {
-		return nil, 0, fmt.Errorf("statement is not terminated properly: expected \\r\\n after %d payload bytes", length)
+		return nil, fmt.Errorf("statement is not terminated properly: expected \\r\\n after %d payload bytes", length)
 	}
 
-	return value, cursor + terminatorLength, nil
+	return buf, nil
 }
 
-func readLengthPrefix(stream []byte, cursor int) (int, int, error) {
-	value, cursor, err := readUntilTerminator(stream, cursor, nil)
+func (p Parser) readLengthPrefix() (int, error) {
+	value, err := p.readUntilTerminator()
 	if err != nil {
-		return 0, 0, fmt.Errorf("unable to read prefix length: %v", err)
+		return 0, fmt.Errorf("unable to read prefix length: %v", err)
 	}
 
 	length, err := strconv.Atoi(string(value))
 	if err != nil {
-		return 0, 0, fmt.Errorf("unable to parse prefix length: %v", err)
+		return 0, fmt.Errorf("unable to parse prefix length: %v", err)
 	}
 
-	return length, cursor, nil
+	return length, nil
 }
 
-func isTerminated(stream []byte, cursor int) (bool, error) {
-	if stream[cursor] == '\n' {
+func (p Parser) isTerminated(b byte) (bool, error) {
+	if b == '\n' {
 		return false, errors.New("encountered \\n without preceding \\r")
 	}
-	if stream[cursor] != '\r' {
+	if b != '\r' {
 		return false, nil
 	}
 
-	if cursor == len(stream)-1 {
-		return false, errors.New("data stream interrupted with \\r with no \\n")
+	b, err := p.reader.ReadByte()
+	if err != nil {
+		return false, fmt.Errorf("error reading buffer: %v", err)
 	}
-	if stream[cursor+1] != '\n' {
-		return false, fmt.Errorf("encountered %q after \\r parsing the element", stream[cursor+1])
+
+	if b != '\n' {
+		return false, fmt.Errorf("encountered %q after \\r parsing the element", b)
 	}
 
 	return true, nil
