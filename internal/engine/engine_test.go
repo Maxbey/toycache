@@ -104,3 +104,57 @@ func TestSetHonorsCancellationBeforeSubmission(t *testing.T) {
 		t.Fatalf("cancelled SET modified keyspace: value %q, found %t", value, found)
 	}
 }
+
+func TestDelete(t *testing.T) {
+	eng := NewEngine()
+	go eng.Run(t.Context())
+
+	if err := eng.Set(t.Context(), []byte("one"), []byte("value")); err != nil {
+		t.Fatalf("setting first key: %v", err)
+	}
+	if err := eng.Set(t.Context(), []byte("two"), []byte("value")); err != nil {
+		t.Fatalf("setting second key: %v", err)
+	}
+
+	deleted, err := eng.Delete(
+		t.Context(),
+		[]byte("one"),
+		[]byte("missing"),
+		[]byte("two"),
+		[]byte("one"),
+	)
+	if err != nil {
+		t.Fatalf("deleting keys: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("unexpected deleted count: got %d, want 2", deleted)
+	}
+
+	for _, key := range []string{"one", "two"} {
+		value, found, err := eng.Get(t.Context(), []byte(key))
+		if err != nil {
+			t.Fatalf("getting deleted key %q: %v", key, err)
+		}
+		if found || value != nil {
+			t.Fatalf("deleted key %q remains: value %q, found %t", key, value, found)
+		}
+	}
+}
+
+func TestDeleteHonorsCancellationBeforeSubmission(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	eng := NewEngine()
+	eng.keyspace["key"] = []byte("value")
+	deleted, err := eng.Delete(ctx, []byte("key"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("unexpected deleted count: got %d, want 0", deleted)
+	}
+	if _, found := eng.keyspace["key"]; !found {
+		t.Fatal("cancelled DELETE modified keyspace")
+	}
+}

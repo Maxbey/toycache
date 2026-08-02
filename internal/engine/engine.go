@@ -82,6 +82,32 @@ func (e *Engine) Set(ctx context.Context, key []byte, value []byte) error {
 	return nil
 }
 
+func (e *Engine) Delete(ctx context.Context, keys ...[]byte) (int64, error) {
+	ks := make([]string, len(keys))
+	for i, key := range keys {
+		ks[i] = string(key)
+	}
+
+	deleted, err := submit(ctx, e, func(e *Engine) int64 {
+		var count int64
+		for _, key := range ks {
+			if _, found := e.keyspace[key]; !found {
+				continue
+			}
+
+			delete(e.keyspace, key)
+			count++
+		}
+
+		return count
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
 func submit[T any](
 	ctx context.Context,
 	engine *Engine,

@@ -143,6 +143,23 @@ func TestRedisClientCommands(t *testing.T) {
 		t.Fatalf("unexpected GET response: got %q, want %q", value, "value")
 	}
 
+	delContext, cancelDel := context.WithTimeout(t.Context(), 2*time.Second)
+	deleted, err := client.Del(delContext, "key", "missing").Result()
+	cancelDel()
+	if err != nil {
+		t.Fatalf("sending DEL with go-redis: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("unexpected DEL response: got %d, want 1", deleted)
+	}
+
+	getContext, cancelGet = context.WithTimeout(t.Context(), 2*time.Second)
+	_, err = client.Get(getContext, "key").Result()
+	cancelGet()
+	if !errors.Is(err, redis.Nil) {
+		t.Fatalf("expected deleted key to return redis.Nil, got %v", err)
+	}
+
 	if err := client.Close(); err != nil {
 		t.Fatalf("closing go-redis client: %v", err)
 	}

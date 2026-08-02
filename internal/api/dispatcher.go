@@ -25,6 +25,7 @@ func NewDispatcher(engine *engine.Engine) *Dispatcher {
 			"PING": commands.Ping{},
 			"GET":  commands.NewGet(engine),
 			"SET":  commands.NewSet(engine),
+			"DEL":  commands.NewDel(engine),
 		},
 	}
 }
