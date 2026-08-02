@@ -12,9 +12,10 @@ func TestSetStoresValue(t *testing.T) {
 	eng := engine.NewEngine()
 	go eng.Run(t.Context())
 
+	value := []byte("value")
 	response, err := NewSet(eng).Execute(t.Context(), []resp.Element{
 		{Type: resp.BulkString, Value: []byte("key")},
-		{Type: resp.BulkString, Value: []byte("value")},
+		{Type: resp.BulkString, Value: value},
 	})
 	if err != nil {
 		t.Fatalf("executing SET: %v", err)
@@ -22,6 +23,7 @@ func TestSetStoresValue(t *testing.T) {
 	if response.Type != resp.String || !bytes.Equal(response.Value, []byte("OK")) {
 		t.Fatalf("unexpected response: %#v", response)
 	}
+	copy(value, "xxxxx")
 
 	value, found, err := eng.Get(t.Context(), []byte("key"))
 	if err != nil {

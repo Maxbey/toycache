@@ -84,7 +84,7 @@ func (s Server) handle(ctx context.Context, con net.Conn) {
 
 	readWriter := bufio.NewReadWriter(
 		bufio.NewReader(con),
-		bufio.NewWriter(con),
+		bufio.NewWriterSize(con, 16<<10),
 	)
 	if err := s.handler(ctx, readWriter); err != nil {
 		slog.Warn("error handling the client connection", "error", err)

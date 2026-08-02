@@ -21,13 +21,19 @@ func TestGet(t *testing.T) {
 		t.Fatalf("unexpected result: value %q, found %t", value, found)
 	}
 
-	value[0] = 'X'
+	if err := eng.Set(t.Context(), key, []byte("new")); err != nil {
+		t.Fatalf("overwriting key: %v", err)
+	}
+	if !bytes.Equal(value, []byte("value")) {
+		t.Fatalf("previous result changed after overwrite: value %q", value)
+	}
+
 	value, found, err = eng.Get(t.Context(), key)
 	if err != nil {
 		t.Fatalf("getting key again: %v", err)
 	}
-	if !found || !bytes.Equal(value, []byte("value")) {
-		t.Fatalf("caller mutated engine-owned value: value %q, found %t", value, found)
+	if !found || !bytes.Equal(value, []byte("new")) {
+		t.Fatalf("unexpected overwritten result: value %q, found %t", value, found)
 	}
 }
 
@@ -65,7 +71,6 @@ func TestSet(t *testing.T) {
 	}
 
 	key[0] = 'X'
-	value[0] = 'X'
 	got, found, err := eng.Get(t.Context(), []byte{'k', 0, 'y'})
 	if err != nil {
 		t.Fatalf("getting stored value: %v", err)
@@ -102,6 +107,27 @@ func TestSetHonorsCancellationBeforeSubmission(t *testing.T) {
 	}
 	if found || value != nil {
 		t.Fatalf("cancelled SET modified keyspace: value %q, found %t", value, found)
+	}
+}
+
+func TestSetReusesValue(t *testing.T) {
+	eng := NewEngine()
+	go eng.Run(t.Context())
+
+	value := []byte("value")
+	if err := eng.Set(t.Context(), []byte("key"), value); err != nil {
+		t.Fatalf("setting value: %v", err)
+	}
+
+	got, found, err := eng.Get(t.Context(), []byte("key"))
+	if err != nil {
+		t.Fatalf("getting stored value: %v", err)
+	}
+	if !found {
+		t.Fatal("stored value was not found")
+	}
+	if &got[0] != &value[0] {
+		t.Fatal("stored value was copied")
 	}
 }
 

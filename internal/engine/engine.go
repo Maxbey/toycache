@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 )
 
@@ -48,6 +47,8 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
+// Get returns an immutable view of the stored value. Callers must not modify
+// the returned slice.
 func (e *Engine) Get(ctx context.Context, key []byte) ([]byte, bool, error) {
 	type getResult struct {
 		value []byte
@@ -58,7 +59,7 @@ func (e *Engine) Get(ctx context.Context, key []byte) ([]byte, bool, error) {
 	r, err := submit(ctx, e, func(e *Engine) getResult {
 		v, found := e.keyspace[k]
 
-		return getResult{bytes.Clone(v), found}
+		return getResult{v, found}
 	})
 	if err != nil {
 		return nil, false, err
@@ -67,11 +68,13 @@ func (e *Engine) Get(ctx context.Context, key []byte) ([]byte, bool, error) {
 	return r.value, r.found, nil
 }
 
+// Set stores value without copying it. The caller transfers ownership of value
+// to the engine and must not access or modify it after calling Set, even when
+// Set returns an error.
 func (e *Engine) Set(ctx context.Context, key []byte, value []byte) error {
 	k := string(key)
-	v := bytes.Clone(value)
 	_, err := submit(ctx, e, func(e *Engine) struct{} {
-		e.keyspace[k] = v
+		e.keyspace[k] = value
 
 		return struct{}{}
 	})

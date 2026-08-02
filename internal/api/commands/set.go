@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -31,7 +32,8 @@ func (Set) Validate(arguments []resp.Element) error {
 }
 
 func (s Set) Execute(ctx context.Context, arguments []resp.Element) (resp.Element, error) {
-	if err := s.engine.Set(ctx, arguments[0].Value, arguments[1].Value); err != nil {
+	value := bytes.Clone(arguments[1].Value)
+	if err := s.engine.Set(ctx, arguments[0].Value, value); err != nil {
 		return resp.Element{}, fmt.Errorf("setting key: %w", err)
 	}
 
