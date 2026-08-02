@@ -83,7 +83,7 @@ func TestConnectionExecutesPing(t *testing.T) {
 	}
 }
 
-func TestRedisClientPingAndMissingGet(t *testing.T) {
+func TestRedisClientCommands(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("starting listener: %v", err)
@@ -124,6 +124,23 @@ func TestRedisClientPingAndMissingGet(t *testing.T) {
 	cancelGet()
 	if !errors.Is(err, redis.Nil) {
 		t.Fatalf("expected missing GET to return redis.Nil, got %v", err)
+	}
+
+	setContext, cancelSet := context.WithTimeout(t.Context(), 2*time.Second)
+	err = client.Set(setContext, "key", "value", 0).Err()
+	cancelSet()
+	if err != nil {
+		t.Fatalf("sending SET with go-redis: %v", err)
+	}
+
+	getContext, cancelGet = context.WithTimeout(t.Context(), 2*time.Second)
+	value, err := client.Get(getContext, "key").Result()
+	cancelGet()
+	if err != nil {
+		t.Fatalf("sending GET with go-redis: %v", err)
+	}
+	if value != "value" {
+		t.Fatalf("unexpected GET response: got %q, want %q", value, "value")
 	}
 
 	if err := client.Close(); err != nil {

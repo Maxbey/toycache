@@ -67,6 +67,21 @@ func (e *Engine) Get(ctx context.Context, key []byte) ([]byte, bool, error) {
 	return r.value, r.found, nil
 }
 
+func (e *Engine) Set(ctx context.Context, key []byte, value []byte) error {
+	k := string(key)
+	v := bytes.Clone(value)
+	_, err := submit(ctx, e, func(e *Engine) struct{} {
+		e.keyspace[k] = v
+
+		return struct{}{}
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func submit[T any](
 	ctx context.Context,
 	engine *Engine,

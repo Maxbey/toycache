@@ -53,3 +53,54 @@ func TestGetHonorsCancellationBeforeSubmission(t *testing.T) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
+
+func TestSet(t *testing.T) {
+	eng := NewEngine()
+	go eng.Run(t.Context())
+
+	key := []byte{'k', 0, 'y'}
+	value := []byte{'v', 0, 'l'}
+	if err := eng.Set(t.Context(), key, value); err != nil {
+		t.Fatalf("setting key: %v", err)
+	}
+
+	key[0] = 'X'
+	value[0] = 'X'
+	got, found, err := eng.Get(t.Context(), []byte{'k', 0, 'y'})
+	if err != nil {
+		t.Fatalf("getting stored value: %v", err)
+	}
+	if !found || !bytes.Equal(got, []byte{'v', 0, 'l'}) {
+		t.Fatalf("unexpected stored value: value %q, found %t", got, found)
+	}
+
+	if err := eng.Set(t.Context(), []byte{'k', 0, 'y'}, []byte("new")); err != nil {
+		t.Fatalf("overwriting key: %v", err)
+	}
+	got, found, err = eng.Get(t.Context(), []byte{'k', 0, 'y'})
+	if err != nil {
+		t.Fatalf("getting overwritten value: %v", err)
+	}
+	if !found || !bytes.Equal(got, []byte("new")) {
+		t.Fatalf("unexpected overwritten value: value %q, found %t", got, found)
+	}
+}
+
+func TestSetHonorsCancellationBeforeSubmission(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	eng := NewEngine()
+	if err := eng.Set(ctx, []byte("key"), []byte("value")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	go eng.Run(t.Context())
+	value, found, err := eng.Get(t.Context(), []byte("key"))
+	if err != nil {
+		t.Fatalf("getting key after cancelled SET: %v", err)
+	}
+	if found || value != nil {
+		t.Fatalf("cancelled SET modified keyspace: value %q, found %t", value, found)
+	}
+}

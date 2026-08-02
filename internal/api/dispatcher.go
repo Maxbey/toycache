@@ -24,6 +24,7 @@ func NewDispatcher(engine *engine.Engine) *Dispatcher {
 		commands: map[string]command{
 			"PING": commands.Ping{},
 			"GET":  commands.NewGet(engine),
+			"SET":  commands.NewSet(engine),
 		},
 	}
 }
