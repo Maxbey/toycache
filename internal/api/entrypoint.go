@@ -2,14 +2,22 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 
+	"github.com/Maxbey/toycache/internal/engine"
 	"github.com/Maxbey/toycache/internal/resp"
 )
 
-var dispatcher = NewDispatcher()
+type Handler struct {
+	dispatcher *Dispatcher
+}
 
-func Entrypoint(readWriter *bufio.ReadWriter) error {
+func NewHandler(engine *engine.Engine) *Handler {
+	return &Handler{dispatcher: NewDispatcher(engine)}
+}
+
+func (h *Handler) Handle(ctx context.Context, readWriter *bufio.ReadWriter) error {
 	reader := resp.NewReader(readWriter.Reader)
 	writer := resp.NewWriter(readWriter.Writer)
 
@@ -23,7 +31,7 @@ func Entrypoint(readWriter *bufio.ReadWriter) error {
 			return nil
 		}
 
-		response, err := dispatcher.Dispatch(request)
+		response, err := h.dispatcher.Dispatch(ctx, request)
 		if err != nil {
 			response = ErrorResponse(err)
 		}

@@ -3,11 +3,12 @@ package api
 import (
 	"testing"
 
+	"github.com/Maxbey/toycache/internal/engine"
 	"github.com/Maxbey/toycache/internal/resp"
 )
 
 func TestDispatcherDispatchesCaseInsensitively(t *testing.T) {
-	got, err := NewDispatcher().Dispatch(commandRequest("ping"))
+	got, err := NewDispatcher(engine.NewEngine()).Dispatch(t.Context(), commandRequest("ping"))
 	if err != nil {
 		t.Fatalf("dispatching PING: %v", err)
 	}
@@ -39,10 +40,10 @@ func TestDispatcherRejectsInvalidRequests(t *testing.T) {
 		},
 	}
 
-	dispatcher := NewDispatcher()
+	dispatcher := NewDispatcher(engine.NewEngine())
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := dispatcher.Dispatch(tt.request); err == nil {
+			if _, err := dispatcher.Dispatch(t.Context(), tt.request); err == nil {
 				t.Fatal("expected request to be rejected")
 			}
 		})

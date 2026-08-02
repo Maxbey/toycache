@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/Maxbey/toycache/internal/api"
+	"github.com/Maxbey/toycache/internal/engine"
 	"github.com/Maxbey/toycache/internal/server"
 )
 
@@ -30,8 +31,15 @@ func main() {
 		MaxConnections: *maxConnections,
 	}
 
-	srv := server.NewServer(cfg, api.Entrypoint)
-	if err := srv.Run(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	eng := engine.NewEngine()
+	go eng.Run(ctx)
+
+	handler := api.NewHandler(eng)
+	srv := server.NewServer(cfg, handler.Handle)
+	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("err running api server: %v", err)
 	}
 }

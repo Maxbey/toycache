@@ -3,12 +3,14 @@ package server
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/Maxbey/toycache/internal/api"
+	"github.com/Maxbey/toycache/internal/engine"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,10 +18,10 @@ func TestConnectionReturnsRESPErrorForMalformedInput(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
-	server := NewServer(Config{}, api.Entrypoint)
+	server := NewServer(Config{}, newAPIHandler(t.Context()))
 	handlerDone := make(chan struct{})
 	go func() {
-		server.handle(serverConn)
+		server.handle(t.Context(), serverConn)
 		close(handlerDone)
 	}()
 
@@ -48,10 +50,10 @@ func TestConnectionReturnsRESPErrorForMalformedInput(t *testing.T) {
 func TestConnectionExecutesPing(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 
-	server := NewServer(Config{}, api.Entrypoint)
+	server := NewServer(Config{}, newAPIHandler(t.Context()))
 	handlerDone := make(chan struct{})
 	go func() {
-		server.handle(serverConn)
+		server.handle(t.Context(), serverConn)
 		close(handlerDone)
 	}()
 
@@ -81,14 +83,14 @@ func TestConnectionExecutesPing(t *testing.T) {
 	}
 }
 
-func TestRedisClientPing(t *testing.T) {
+func TestRedisClientPingAndMissingGet(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("starting listener: %v", err)
 	}
 
-	server := NewServer(Config{MaxConnections: 1}, api.Entrypoint)
 	serverContext, stopServer := context.WithCancel(t.Context())
+	server := NewServer(Config{MaxConnections: 1}, newAPIHandler(serverContext))
 	serverDone := make(chan error, 1)
 	go func() {
 		serverDone <- server.serve(serverContext, listener)
@@ -117,6 +119,13 @@ func TestRedisClientPing(t *testing.T) {
 		t.Fatalf("unexpected PING response: got %q, want %q", result, "PONG")
 	}
 
+	getContext, cancelGet := context.WithTimeout(t.Context(), 2*time.Second)
+	_, err = client.Get(getContext, "missing").Result()
+	cancelGet()
+	if !errors.Is(err, redis.Nil) {
+		t.Fatalf("expected missing GET to return redis.Nil, got %v", err)
+	}
+
 	if err := client.Close(); err != nil {
 		t.Fatalf("closing go-redis client: %v", err)
 	}
@@ -130,4 +139,11 @@ func TestRedisClientPing(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not stop after cancellation")
 	}
+}
+
+func newAPIHandler(ctx context.Context) func(context.Context, *bufio.ReadWriter) error {
+	eng := engine.NewEngine()
+	go eng.Run(ctx)
+
+	return api.NewHandler(eng).Handle
 }

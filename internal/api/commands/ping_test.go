@@ -27,7 +27,7 @@ func TestPing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := (Ping{}).Execute(tt.arguments)
+			got, err := (Ping{}).Execute(t.Context(), tt.arguments)
 			if err != nil {
 				t.Fatalf("executing PING: %v", err)
 			}

@@ -21,10 +21,10 @@ type Config struct {
 
 type Server struct {
 	cfg     Config
-	handler func(*bufio.ReadWriter) error
+	handler func(context.Context, *bufio.ReadWriter) error
 }
 
-func NewServer(cfg Config, handler func(*bufio.ReadWriter) error) Server {
+func NewServer(cfg Config, handler func(context.Context, *bufio.ReadWriter) error) Server {
 	return Server{
 		cfg:     cfg,
 		handler: handler,
@@ -74,19 +74,19 @@ func (s Server) serve(ctx context.Context, listener net.Listener) error {
 		go func(con net.Conn) {
 			defer func() { <-slots }()
 
-			s.handle(con)
+			s.handle(ctx, con)
 		}(con)
 	}
 }
 
-func (s Server) handle(con net.Conn) {
+func (s Server) handle(ctx context.Context, con net.Conn) {
 	defer con.Close()
 
 	readWriter := bufio.NewReadWriter(
 		bufio.NewReader(con),
 		bufio.NewWriter(con),
 	)
-	if err := s.handler(readWriter); err != nil {
+	if err := s.handler(ctx, readWriter); err != nil {
 		slog.Warn("error handling the client connection", "error", err)
 	}
 }

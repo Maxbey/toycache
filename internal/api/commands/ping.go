@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/Maxbey/toycache/internal/resp"
@@ -19,7 +20,7 @@ func (Ping) Validate(arguments []resp.Element) error {
 	return nil
 }
 
-func (Ping) Execute(arguments []resp.Element) (resp.Element, error) {
+func (Ping) Execute(_ context.Context, arguments []resp.Element) (resp.Element, error) {
 	if len(arguments) == 0 {
 		return resp.Element{Type: resp.String, Value: []byte("PONG")}, nil
 	}
